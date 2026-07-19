@@ -1,0 +1,694 @@
+#for documentation see project at https://github.com/Dilbert66/esphome-VistaECP
+substitutions:
+  name: "alarm-system" #unique network name, system name
+  friendlyName: "Alarm System" #used as the friendly name of your application in HomeAssistant
+  panelId: "alarm_system" #used as the service variable name.
+  accesscode: !secret access_code #Only comes into effect if needed for arming and quickarm is not set
+  device_description: House Alarm System
+
+vista_alarm_panel:
+  id: $panelId
+  accesscode: $accesscode #Only comes into effect if needed for arming and quickarm is not set
+  maxzones: "48" #maximum amount of zones that your panel supports
+  maxpartitions: "1" #maximum amount of partitions that your panel supports
+
+  # Enroll your RF serial devices here. Format: serial#:loop#:zone#  Each record is comma separated.
+  # For most devices loop1 is used such as 5800pir, other devices such as 5816 will use loop2.  Please refer to your
+  # RF device programming (*56 program) to see what loop and zones are assigned to your RF devices. 
+  # You can refer to the pdf link below for more details on loop numbers 
+  # https://advancedsecurityllc.com/wp-content/uploads/5800%20Wireless%20Device%20List.pdf
+  #
+  # Note: These entries are used to identify and report immediate open/close/battery
+  # activities directly from your RF devices, bypassing the panel. This is beneficial
+  # since the panel only reports open events to the keypads. The firmware will work fine
+  # without these entries except you will have a delay of TTL milliseconds before 
+  # the report of closed zones. 
+
+# list of RF serial numbers with associated zone and bitmask. 
+  rfseriallookup: >-
+       0027650:1:9,0022107:1:10,0234887:1:11,0235229:1:12,0782422:1:13,0967424:1:14,0339925:1:15,0259874:1:16,0669333:1:17,
+       0456505:3:18,0190072:1:19,0220966:1:20,0108948:1:21,0031867:1:22,0032002:1:23,0071915:3:24,0591092:1:25,0259946:1:26,
+       0873574:1:27,0318796:3:28,0445236:3:29,0445235:1:30
+  
+  defaultpartition: "1" #set to your main partition
+  vistadebuglevel: "3" #component debug level for messages
+
+  #assign a new virtual keypad address to each active partition using programs *190 - *196
+  #and enter it below.  For unused partitions, use 0 as the keypad address.
+  keypadaddr1: "17" #partition 1 virtual keyapd
+  keypadaddr2: "0" #partition 2 virtual keypad. set to 0 to disable
+  keypadaddr3: "0" #partition 3 virtual keypad. set to 0 to disable
+
+  auiaddr: "1" #AUI address from program field *189 to use for zone status queries. Ensure it is not assigned to a real keypad.
+
+  ##esp32
+  rxpin: "22" #GPIO pin to use for data receive (yellow line) 
+  txpin: "21" #GPIO pin to use for data transmit (green line)
+  monitorpin: "18" #GPIO pin to use for monitoring module traffic such as RF or Expanders . Set to -1 to disable
+
+  #input mode control
+  invert_mon: "true"
+  invert_rx: "true"
+  invert_tx: "true"
+  input_mode_rx: INPUT
+  input_mode_mon: INPUT
+
+  ##esp8266
+#  rxPin: "5" #GPIO pin to use for data receive (yellow line) 
+#  txPin: "4" #GPIO pin to use for data transmit (green line)
+#  monitorPin: "14" #GPIO pin to use for monitoring module traffic such as RF or Expanders . Set to -1 to disable
+
+  #note for the vista128 and vista250, the expanderaddr and relayaddr addresses must be 0
+  # module addresses:
+  # 07 4229 zone expander  zones 9-16
+  # 08 4229 zone expander zones 17-24
+  # 09 4229 zone expander zones 25-32
+  # 10 4229 zone expander zones 33-40
+  # 11 4229 zone expander zones 41 48
+  # 12 4204 relay module  
+  # 13 4204 relay module
+  # 14 4204 relay module
+  # 15 4204 relay module
+
+  expanderaddr1: "11" # 1st zone expander emulator (4229) address to use . Set to 0 to disable. 
+  expanderaddr2: "0" # 2nd expander emulator address to use . Set to 0 to disable. 
+  
+  relayaddr1: "0" # relay module emulation (4204) addresses. Set to 0 to disable
+  relayaddr2: "0"
+  relayaddr3: "0"
+  relayaddr4: "0"
+  
+  ttl: "30000"  # time  to live  in ms for zone/fire status before expiring;
+  quickarm: "false"
+  lrrsupervisor: "true" # set to true if we don't have an LRR monitoring supervisor we can emulate one to get the statuses
+
+  #enable use of second esp32 core for async polling of panel data. default: true
+  # set to false if you get watchdog errors
+  use_async_polling: true
+
+  clean_build: "false" #default is false.  only set to true if getting duplication errors in linking step. Once you compile, reset it back to false.  
+
+esp32:
+  board: nodemcu-32s
+  framework: 
+    type: arduino
+    version: recommended
+
+#esp8266:    
+  #board: nodemcuv2
+  #framework:
+    #version: recommended
+
+#location of alarm panel code.  You can use the github release version  or 
+#copy the code to directory "my_components" in your main esphome directory
+# see here for more info: https://esphome.io/components/external_components    
+external_components:
+  - source: github://Dilbert66/esphome-components@dev #uncomment to use github repository
+  #- source: github://XD36JD2015/esphome-components@dev
+  #- source:  my_components #uncomment to use local directory  
+    components: [vista_alarm_panel] 
+    refresh: 10min
+  #  refresh: never
+
+## web keypad component
+## each included files will be downloaded automatically and compiled within the flash.  
+## there will be no need for internet access when running. 
+#For www.js build details and source: https://github.com/Dilbert66/esphome-webserver-custom/tree/keypad
+#Component source: https://github.com/Dilbert66/esphome-components/tree/keypad/components/web_keypad
+### Note: this is an ESP32 only component. The esp8266 does not support the resources needed.
+
+#mg_lib:
+
+#web_keypad:
+#  port: 80 
+#  partitions: 1  # a keypad will be shown for each partition
+#  log: false
+#  auth:          #this section is optional. Enable if you need authentication/encryption
+#    username: test
+#    password: test
+#    encryption: true  #set true to use AES256HMAC encryption/auth for sent keys and returned LCD messages
+                      #set to false to use Digest authentication - no encryption
+#  config_url: https://dilbert66.github.io/config_files/config_vista.yml
+#  js_url: https://dilbert66.github.io/js_files/www.js
+  ## If you prefer to use locally hosted compile time files comment two lines above and uncomment below  
+  #config_local: ./config_vista.yml     
+  #js_local: ./www.js    
+  
+   ## custom function call to send keypresses if other than dsc/vista components are used. Parmeters are a string keys and int partition
+  #service_lambda: |- 
+      #$panelId->alarm_keypress_partition(keys,partition);    
+    
+#you can remove/disable this section if you don't want your panel time updated automatically. 
+#interval:
+#  - interval: 7200s
+#    then:
+#      - lambda: |-
+#          $panelId->set_panel_time();     
+  
+esphome:
+  name: $name
+  friendly_name: $friendlyName
+  comment: ${device_description}
+
+#Example of how to set the panel time from the esp time on bootup  
+#  on_boot:
+#    priority: -100
+#    then:
+#      - delay: 30s
+#      - lambda: |-
+#            $panelId->set_panel_time();  
+  
+# output sympols to output.map for debugging. you can remove if not needed
+#  platformio_options:
+#    build_flags: 
+#        - "-Wl,-Map,output.map"  
+
+wifi:
+  ssid: !secret wifi_ssid3
+  password: !secret wifi_password3
+  domain: .browncowalliance.io
+  fast_connect: on
+
+#  ap:
+#    ssid: "$name"
+#    password: !secret wifi_password
+
+logger:
+  baud_rate: 115200
+  level: DEBUG
+
+api:
+  encryption:
+     key: "qb02zm9QvD5i5PxJfvKvo2VZgHOtViKmaJ3ZPA/d7vs="
+  custom_services: true 
+
+safe_mode: 
+  
+ota:
+   password: "GWz5hWKsiSHrK+r9LDmzoGFr+RXuAPoWxJL3iEn3Uu0="
+   platform: esphome
+   on_begin:
+          switch.turn_off: connection_status_switch 
+
+#time:
+# - platform: sntp
+
+time:
+  - platform: homeassistant
+    id: homeassistant_time         
+
+######################################################################## 
+# Edit binary and text sensors below to suit your alarm setup.
+# You can safely add or remove any sensor as needed. 
+# The id code is entered using the "id:" tag.  Alternatively you can
+# add the id code in round brackets  at the end of the sensor name: eg. (z1)
+binary_sensor:
+
+### zone sensors ###
+# open/close status for each zone 
+# zone id code = z+zone number
+  - platform: vista_alarm_panel
+    id: z1
+    name: "Front Door"
+    device_class: door
+    trigger_on_initial_state: true
+
+  - platform: vista_alarm_panel
+    id: z2
+    name: "Back Door" 
+    device_class: door
+    trigger_on_initial_state: true
+
+  - platform: vista_alarm_panel
+    id: z3
+    name: "Side Door"  
+    device_class: door
+    trigger_on_initial_state: true
+
+  - platform: vista_alarm_panel
+    id: z4
+    name: "Basement Door" 
+    device_class: door
+    trigger_on_initial_state: true
+
+  - platform: vista_alarm_panel
+    id: z5
+    name: "Hall Motion"  
+    device_class: motion
+    trigger_on_initial_state: true
+
+  - platform: vista_alarm_panel
+    id: z9
+    name: "Living Room Smoke"  
+    device_class: smoke
+    trigger_on_initial_state: true
+
+  - platform: vista_alarm_panel
+    id: z10
+    name: "Basement 1 Smoke"
+    device_class: smoke
+    trigger_on_initial_state: true
+
+  - platform: vista_alarm_panel
+    id: z11
+    name: "Hall Smoke"
+    device_class: smoke
+    trigger_on_initial_state: true
+
+  - platform: vista_alarm_panel
+    id: z12
+    name: "Basement 2 Smoke"
+    device_class: smoke
+    trigger_on_initial_state: true
+
+  - platform: vista_alarm_panel
+    id: z13
+    name: "Master Bedroom Smoke"
+    device_class: smoke
+    trigger_on_initial_state: true
+
+  - platform: vista_alarm_panel
+    id: z14
+    name: "Kitchen Heat"
+    device_class: heat
+    trigger_on_initial_state: true
+
+  - platform: vista_alarm_panel
+    id: z15
+    name: "Upstairs Carbon Monoxide"
+    device_class: carbon_monoxide
+    trigger_on_initial_state: true
+
+  - platform: vista_alarm_panel
+    id: z16
+    name: "Basement Carbon Monoxide"
+    device_class: carbon_monoxide
+    trigger_on_initial_state: true
+
+  - platform: vista_alarm_panel
+    id: z17
+    name: "Upstairs Glass Break"
+    device_class: sound
+    trigger_on_initial_state: true
+
+  - platform: vista_alarm_panel
+    id: z18
+    name: "Basement Flood"
+    device_class: moisture
+    trigger_on_initial_state: true
+
+  - platform: vista_alarm_panel
+    id: z19
+    name: "Edwyn Room Smoke"
+    device_class: smoke
+    trigger_on_initial_state: true
+
+  - platform: vista_alarm_panel
+    id: z20
+    name: "Basement Bedroom Smoke"
+    device_class: smoke
+    trigger_on_initial_state: true
+
+  - platform: vista_alarm_panel
+    id: z21
+    name: "Living Room Motion"
+    device_class: motion
+    trigger_on_initial_state: true
+
+  - platform: vista_alarm_panel
+    id: z22
+    name: "Edwyn Room 1 Window"
+    device_class: window
+    trigger_on_initial_state: true
+
+  - platform: vista_alarm_panel
+    id: z23
+    name: "Edwyn Room 2 Window"
+    device_class: window
+    trigger_on_initial_state: true
+
+  - platform: vista_alarm_panel
+    id: z24
+    name: "Basement Flood 2"
+    device_class: moisture
+    trigger_on_initial_state: true
+
+  - platform: vista_alarm_panel
+    id: z25
+    name: "Master Bedroom Motion"
+    device_class: motion
+    trigger_on_initial_state: true
+
+  - platform: vista_alarm_panel
+    id: z26
+    name: "Office Motion"
+    device_class: motion
+    trigger_on_initial_state: true
+
+  - platform: vista_alarm_panel
+    id: z27
+    name: "Dining Room Motion"
+    device_class: motion
+    trigger_on_initial_state: true
+
+  - platform: vista_alarm_panel
+    id: z28
+    name: "Basement Flood 3"
+    device_class: moisture
+    trigger_on_initial_state: true
+
+  - platform: vista_alarm_panel
+    id: z29
+    name: "Kitchen Sink"
+    device_class: moisture
+    trigger_on_initial_state: true
+
+  - platform: vista_alarm_panel
+    id: z30
+    name: "Kitchen Low Temperature"
+    device_class: cold
+    trigger_on_initial_state: true
+
+  - platform: vista_alarm_panel
+    id: z41
+    device_class: smoke
+    trigger_on_initial_state: true
+
+  - platform: vista_alarm_panel
+    id: z42
+    device_class: safety
+    trigger_on_initial_state: true
+
+  - platform: vista_alarm_panel
+    id: z43
+    name: "Basement Flood 4"
+    device_class: moisture
+    trigger_on_initial_state: true
+
+  - platform: vista_alarm_panel
+    id: z44
+    device_class: door
+    trigger_on_initial_state: true
+
+  - platform: vista_alarm_panel
+    id: z45
+    device_class: garage_door
+    trigger_on_initial_state: true
+
+  - platform: vista_alarm_panel
+    id: z46
+    name: "Alarm System Test"
+    device_class: garage_door
+    trigger_on_initial_state: true
+
+  - platform: vista_alarm_panel
+    id: z95
+    name: "Fire Button"
+    device_class: smoke
+    trigger_on_initial_state: true
+
+  - platform: vista_alarm_panel
+    id: z99
+    name: "Panic Button"
+    device_class: safety
+    trigger_on_initial_state: true
+
+# you can also add fields to show fault statuses of other devices you have.  The id will be 1 + device address.  
+
+#relay addresses are 12/13/14/15
+#  - platform: vista_alarm_panel
+#    id: z115
+#    name: "check relay 12"  
+#    device_class: problem
+
+#zone expander device addresses are 07/08/09/10/11
+  - platform: vista_alarm_panel
+    id: z111
+    name: "check expander 11"  
+    device_class: problem
+    trigger_on_initial_state: true
+
+#comm device address such as Alarmnet/LRR is 03
+  - platform: vista_alarm_panel
+    id: z103    
+    name: "check comm device"  
+    device_class: problem
+    trigger_on_initial_state: true
+
+#rf receiver is 00
+  - platform: vista_alarm_panel
+    id: z100
+    name: "check rf receiver"  
+    device_class: problem
+    trigger_on_initial_state: true
+
+### non zone sensors ###
+
+# partition ready status
+# ready id code = rdy_ + partition number
+  - platform: vista_alarm_panel
+    id: rdy_1
+    name: "Ready"
+    trigger_on_initial_state: true
+
+# partition/panel trouble status 
+# trouble id code = trbl_ + partition number
+  - platform: vista_alarm_panel
+    id: trbl_1
+    name: "Trouble"
+    device_class: problem
+    trigger_on_initial_state: true
+
+# bypass zones active status
+# bypass id code = byp_ + partition number   
+  - platform: vista_alarm_panel
+    id: byp_1
+    name: "Bypass"
+    trigger_on_initial_state: true
+
+# armed away status
+# armed away id code = arma_ + partition number 
+  - platform: vista_alarm_panel
+    id: arma_1
+    name: "Away"
+    trigger_on_initial_state: true
+
+# armed status 
+# armed id code = arm_ + partition number
+  - platform: vista_alarm_panel
+    id: arm_1
+    name: "Armed"
+    trigger_on_initial_state: true
+
+# armed stay status
+# armed stay id code = arms_ + partition number
+  - platform: vista_alarm_panel
+    id: arms_1
+    name: "Stay"
+    trigger_on_initial_state: true
+
+# armed instant status
+# armed instant id code = armi_ + partition number    
+  - platform: vista_alarm_panel
+    id: armi_1
+    name: "Instant"
+    trigger_on_initial_state: true
+
+# armed night status
+# armed night id code = armn_ + partition number    
+  - platform: vista_alarm_panel
+    id: armn_1
+    name: "Night"
+    trigger_on_initial_state: true
+
+# ac status
+# ac id code = (ac)       
+  - platform: vista_alarm_panel
+    id: ac
+    name: "AC"
+    device_class: plug  
+    trigger_on_initial_state: true
+
+# chime status
+# chime id code = chm_ + partition number  
+  - platform: vista_alarm_panel
+    id: chm_1
+    name: "Chime"
+    trigger_on_initial_state: true
+
+# alarm status
+# alarm id code = alm_ + partition number   
+  - platform: vista_alarm_panel
+    id: alm_1
+    name: "Alarm"
+    device_class: safety
+    trigger_on_initial_state: true
+
+# battery status
+# battery id code = bat  
+  - platform: vista_alarm_panel
+    id: bat
+    name: "Battery"
+    device_class: battery
+    trigger_on_initial_state: true
+
+# fire alarm status
+# fire alarm id code = fire_ + partition number 
+  - platform: vista_alarm_panel
+    id: fire_1
+    name: "Fire"
+    device_class: safety
+    trigger_on_initial_state: true
+
+#shop fire zone action
+  - platform: homeassistant
+    id: shop_fire
+    entity_id: binary_sensor.alarm_system_shop_fire_1
+    trigger_on_initial_state: true
+    on_press:
+      lambda: |-
+        $panelId->set_zone_fault(41,1);
+    on_release:
+      lambda: |-
+        $panelId->set_zone_fault(41,0);
+
+  #shop alarm zone action
+  - platform: homeassistant
+    id: shop_alarm
+    entity_id: binary_sensor.alarm_system_shop_alm_1
+    trigger_on_initial_state: true
+    on_press:
+      lambda: |-
+        $panelId->set_zone_fault(42,1);
+    on_release:
+      lambda: |-
+        $panelId->set_zone_fault(42,0);
+
+  #shop man door zone action
+  - platform: homeassistant
+    id: shop_man_door
+    entity_id: binary_sensor.alarm_system_shop_z2
+    trigger_on_initial_state: true
+    on_press:
+      lambda: |-
+        $panelId->set_zone_fault(44,1);
+    on_release:
+      lambda: |-
+        $panelId->set_zone_fault(44,0);
+
+  #shop garage door zone action
+  - platform: homeassistant
+    id: shop_left_door
+    entity_id: binary_sensor.alarm_system_shop_z3
+    trigger_on_initial_state: true
+    on_press:
+      lambda: |-
+        $panelId->set_zone_fault(45,1);
+    on_release:
+      lambda: |-
+        $panelId->set_zone_fault(45,0);
+
+  #shop garage door zone action
+  - platform: homeassistant
+    id: shop_right_door
+    entity_id: binary_sensor.alarm_system_shop_z6
+    trigger_on_initial_state: true
+    on_press:
+      lambda: |-
+        $panelId->set_zone_fault(45,1);
+    on_release:
+      lambda: |-
+        $panelId->set_zone_fault(45,0);
+
+#### text sensors ####
+text_sensor:
+
+# system status messages
+# system status id code = ss_ + partition number  
+  - platform: vista_alarm_panel
+    id: ss_1
+    name: "System Status"
+    icon: "mdi:shield"
+
+# long range radio messages
+# lrr id code = lrr 
+  - platform: vista_alarm_panel
+    id: lrr
+    name: "Lrr Msg"
+    icon: "mdi:alert-box"
+
+# RF zone messages
+# RF id code = rf  
+  - platform: vista_alarm_panel
+    id: rf
+    name: "RF Msg"
+    icon: "mdi:alert-box" 
+
+# virtual lcd keypad line1 and line2 messages for each partition   
+# partition line1 id code = ln1_ + partition number
+# partition line2 id code = ln2_ + partition number
+# partition 1
+  - platform: vista_alarm_panel
+    id: ln1_1
+    name: "Line1"
+    icon: "mdi:message-text" 
+
+  - platform: vista_alarm_panel
+    id: ln2_1
+    name: "Line2"
+    icon: "mdi:message-text"
+
+# zone status messages bypas/open/alarm
+# zone status id code = zs
+  - platform: vista_alarm_panel
+    id: zs
+    name: "Zone Status" 
+    icon: "mdi:message-text"  
+
+# system beeps
+# beeps id code = bp_ + partition number 
+  - platform: vista_alarm_panel
+    id: bp_1
+    name: "Beeps" 
+    icon: "mdi:volume-low" 
+
+  - platform: template
+    id: check
+    name: "Check"
+
+# end of panel sensor setup - no need to edit anything below.
+##############################################################################
+
+switch:
+  - platform: template
+    name: "Connection"
+    id: connection_status_switch
+    restore_mode: DISABLED    
+    lambda: |-
+      return $panelId->connected();
+    icon: "mdi:shield-link-variant"
+    turn_on_action:
+      - switch.toggle: restart_switch
+    turn_off_action:
+      - lambda: |-
+         $panelId->stop();
+  - platform: restart
+    id: restart_switch
+  - platform: safe_mode
+    name: "Safe Mode"   
+
+
+#debug:
+#  update_interval: 300s
+
+#sensor:
+#  - platform: debug
+#    free:
+#      name: "Heap Free"
+#    block:
+#      name: "Heap Max Block"
+#    loop_time:
+ #     name: "Loop Time"   
+    #fragmentation: #esp8266 only
+     # name: "Heap Fragmentation"      
+    

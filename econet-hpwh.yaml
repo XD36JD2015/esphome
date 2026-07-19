@@ -1,0 +1,41 @@
+substitutions:
+  tx_pin: GPIO6
+  rx_pin: GPIO5
+  name: econet-hpwh
+  friendly_name: Water Heater
+
+esp32:
+  board: esp32-s3-devkitc-1
+  variant: esp32s3
+  framework:
+    type: esp-idf
+
+esphome:
+  name: ${name}
+  name_add_mac_suffix: false
+  friendly_name: ${friendly_name}
+
+ota:
+  - platform: esphome
+    password: "dNjZp8iGUvybxXU/bkerj3QpZKzW8TaN8KNOL9CauFE="
+
+api:
+  encryption:
+    key: 5UwCijcVwVVko9TNUek+szlB8oU2S8/dulomN6/l+DQ=
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  domain: .browncowalliance.io
+  fast_connect: on
+
+time:
+  - platform: homeassistant
+    id: homeassistant_time
+
+packages:
+  econet:
+    url: https://github.com/esphome-econet/esphome-econet
+    ref: main
+    file: econet_heatpump_water_heater.yaml
+    refresh: never

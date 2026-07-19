@@ -1,0 +1,1125 @@
+# ============================================================
+# Weather Display v2 — "console" face (La Crosse aesthetic)
+# CrowPanel Advance 9" ESP32-P4, board v1.0
+#
+# Layout (1024x600), bordered zones with header bars:
+#   [ FORECAST      ][ OUTDOOR       ][ WIND            ]
+#   [ AQI / UV      ][ ALERTS        ][ RAIN            ]
+# + hidden overlay banner: stale data
+# + hidden in-zone icons (ALERTS zone): lightning nearby, NWS alert
+#
+# REQUIRED before build:
+#   1. DSEG7Classic-Bold.ttf next to this YAML
+#      (github.com/keshikan/DSEG -> Releases -> zip)
+#   2. network_adapter_esp32c6.bin next to this YAML
+#   3. Indoor temp/humidity entity IDs below (<-- CHECK)
+# ============================================================
+
+substitutions:
+  fallback_ap_password: "R83f4s9+H+VGK4YeEZGL85C0SrKwzX1UES0NE8y9Wc="
+  # Generate with:  openssl rand -base64 32
+  ha_encryption_key: "7Et7uFExgcpPfT1Ht0JKaqRzGprSxf06r9YIwSfcS2U="
+
+esphome:
+  name: weather-display
+  friendly_name: Weather Display
+  on_boot:
+    priority: -100
+    then:
+      - light.turn_on:
+          id: back_light
+          brightness: 50%
+      # homeassistant-platform entities (and their attributes) don't
+      # reliably fire on_state/on_value for their first push after a
+      # reboot when already true/set, so the overlay/icon show-hide
+      # and the NWS event/severity text never apply until something
+      # actually changes. Force a resync once the API session is up;
+      # run it twice since attribute subscriptions (event/severity)
+      # can land noticeably later than plain entity states.
+      - wait_until:
+          condition:
+            api.connected:
+          timeout: 30s
+      - delay: 5s
+      - script.execute: resync_alerts
+      - delay: 5s
+      - script.execute: resync_alerts
+
+esp32:
+  board: esp32-p4
+  flash_size: 16MB
+  cpu_frequency: 360MHz
+  framework:
+    type: esp-idf
+    sdkconfig_options:
+      CONFIG_SPIRAM_FETCH_INSTRUCTIONS: y
+      CONFIG_SPIRAM_RODATA: y
+
+psram:
+  mode: hex
+  speed: 200MHz
+
+esp_ldo:
+  - channel: 3
+    voltage: 2.5V
+
+logger:
+  baud_rate: 115200
+  hardware_uart: UART0
+  level: INFO
+
+api:
+  encryption:
+    key: $ha_encryption_key
+
+ota:
+  - platform: esphome
+
+esp32_hosted:
+  variant: ESP32C6
+  reset_pin: GPIO32
+  cmd_pin: GPIO19
+  clk_pin: GPIO18
+  d0_pin: GPIO14
+  d1_pin: GPIO15
+  d2_pin: GPIO16
+  d3_pin: GPIO17
+  active_high: true
+  sdio_frequency: 8000000
+
+wifi:
+  ssid: !secret wifi_ssid3
+  password: !secret wifi_password3
+  domain: .browncowalliance.io
+  fast_connect: on
+  min_auth_mode: WPA2
+  ap:
+    ssid: "weather-display-setup"
+    password: $fallback_ap_password
+
+captive_portal:
+
+update:
+  - platform: esp32_hosted
+    id: esp_hosted_fw
+    type: embedded
+    path: network_adapter_esp32c6.bin
+    sha256: 62cbea4ebdfbfea6bce961a519185ac6ff55080d393cab5653485d64822b7d86
+
+switch:
+  - platform: gpio
+    pin: GPIO29
+    id: display_power
+    name: "Display Power"
+    restore_mode: ALWAYS_ON
+
+output:
+  - platform: ledc
+    pin: GPIO31
+    id: backlight_pwm
+    frequency: 1000 Hz
+
+light:
+  - platform: monochromatic
+    output: backlight_pwm
+    name: "Display Backlight"
+    id: back_light
+    restore_mode: ALWAYS_ON
+
+display:
+  - platform: mipi_dsi
+    id: my_display
+    model: WAVESHARE-ESP32-P4-WIFI6-TOUCH-LCD-7B
+    reset_pin:
+      number: 41
+    rotation: 0
+    update_interval: never
+    auto_clear_enabled: false
+    dimensions:
+      width: 1024
+      height: 600
+
+i2c:
+  - id: bus_a
+    sda: GPIO45
+    scl: GPIO46
+    frequency: 100kHz
+
+touchscreen:
+  platform: gt911
+  reset_pin: GPIO40
+  interrupt_pin: GPIO42
+  transform:
+    mirror_x: false
+    mirror_y: false
+
+# ── Fonts ───────────────────────────────────────────────────
+font:
+  # Seven-segment digits (local file — see header notes)
+  - file: "DSEG7Classic-Bold.ttf"
+    id: seg_xl
+    size: 100
+    glyphs: "0123456789.-: "
+  - file: "DSEG7Classic-Bold.ttf"
+    id: seg_lg
+    size: 64
+    glyphs: "0123456789.-: "
+  - file: "DSEG7Classic-Bold.ttf"
+    id: seg_md
+    size: 44
+    glyphs: "0123456789.-: "
+  - file: "DSEG7Classic-Bold.ttf"
+    id: seg_sm
+    size: 30
+    glyphs: "0123456789.-: "
+  # Headers, units, labels
+  - file: "gfonts://Roboto@700"
+    id: hdr
+    size: 22
+    glyphs: "ABCDEFGHIJKLMNOPQRSTUVWXYZ /"
+  - file: "gfonts://Roboto@500"
+    id: unit_lg
+    size: 30
+    glyphs: "0123456789.%°/·—-:µ³ ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+  - file: "gfonts://Roboto@400"
+    id: unit_sm
+    size: 20
+    glyphs: "0123456789.%°/·—-:µ³ ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+  # NWS alert word: small enough that "THUNDERSTORM" fits the 136px
+  # label width without LVGL breaking the word mid-line
+  - file: "gfonts://Roboto@400"
+    id: unit_xs
+    size: 16
+    glyphs: "0123456789.%°/·—-: ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+  # Big weather glyph for the FORECAST zone
+  - file: "https://github.com/Templarian/MaterialDesign-Webfont/raw/master/fonts/materialdesignicons-webfont.ttf"
+    id: mdi_xl
+    size: 90
+    glyphs: [
+      "\U000F0599", "\U000F0594", "\U000F0590", "\U000F0595",
+      "\U000F0591", "\U000F0592", "\U000F0593", "\U000F067E",
+      "\U000F0596", "\U000F0597", "\U000F0598", "\U000F067F",
+      "\U000F059D", "\U000F059E", "\U000F0026",
+    ]
+  - file: "https://github.com/Templarian/MaterialDesign-Webfont/raw/master/fonts/materialdesignicons-webfont.ttf"
+    id: mdi_sm
+    size: 26
+    glyphs: [ "\U000F0241", "\U000F0026", "\U000F0533", "\U000F0534", "\U000F0535" ]
+  # Lightning-nearby icon + hazard-specific NWS alert icons
+  - file: "https://github.com/Templarian/MaterialDesign-Webfont/raw/master/fonts/materialdesignicons-webfont.ttf"
+    id: mdi_alert
+    size: 72
+    glyphs: [
+      "\U000F0241", "\U000F0026", "\U000F0593", "\U000F059D",
+      "\U000F0F38", "\U000F0EFA", "\U000F0F36", "\U000F0F29",
+      "\U000F1502", "\U000F0598", "\U000F0E01", "\U000F15D7",
+      "\U000F0591", "\U000F0F37", "\U000F0898", "\U000F185A",
+      "\U000F0A71", "\U000F1799", "\U000F1B5A",
+    ]
+  # Comfort-level face in the FORECAST zone (Dry..Miserable)
+  - file: "https://github.com/Templarian/MaterialDesign-Webfont/raw/master/fonts/materialdesignicons-webfont.ttf"
+    id: mdi_face
+    size: 80
+    glyphs: [ "\U000F01F2", "\U000F01F5", "\U000F01F6", "\U000F01F8", "\U000F069B", "\U000F0C6D", "\U000F10DF", "\U000F157D" ]
+
+# ── HA data feeds ───────────────────────────────────────────
+time:
+  - platform: homeassistant
+    id: ha_time
+
+globals:
+  # Tap-to-ack: true once the user taps the NWS icon; stops the local
+  # flash until the alert clears or a new event arrives.
+  - id: alert_acked
+    type: bool
+    initial_value: 'false'
+  # Blink phases, driven by the 250ms interval: blink_fast flips every
+  # tick (250ms, PDS alerts), blink_phase every other tick (500ms,
+  # normal alerts + rain pulse).
+  - id: blink_phase
+    type: bool
+    initial_value: 'false'
+  - id: blink_fast
+    type: bool
+    initial_value: 'false'
+  # True while the currently displayed NWS alert is a Particularly
+  # Dangerous Situation (HA prefixes the event with "PDS ").
+  - id: pds_active
+    type: bool
+    initial_value: 'false'
+  # Local-only lightning ack: tap stops the icon flashing (icon stays
+  # solid while lightning remains nearby); no HA-side effect.
+  - id: lightning_acked
+    type: bool
+    initial_value: 'false'
+
+sensor:
+  - platform: homeassistant
+    id: outside_temp
+    entity_id: sensor.thermo_hygro_sensor_temperature
+    on_value:
+      - lvgl.label.update:
+          id: temp_label
+          text: { format: "%.0f", args: [ 'x' ] }
+      - lvgl.label.update:
+          id: temp_label
+          text_color: !lambda |-
+            if (x < 0)  return lv_color_hex(0xCC66FF);
+            if (x < 32) return lv_color_hex(0x3D8BFD);
+            if (x < 50) return lv_color_hex(0x35C7EC);
+            if (x < 75) return lv_color_hex(0x00E400);
+            if (x < 85) return lv_color_hex(0xFFFF00);
+            if (x < 95) return lv_color_hex(0xFF7E00);
+            return lv_color_hex(0xFF0000);
+  - platform: homeassistant
+    id: humidity
+    entity_id: sensor.thermo_hygro_sensor_humidity
+    on_value:
+      - lvgl.label.update:
+          id: rh_label
+          text: { format: "%.0f", args: [ 'x' ] }
+  - platform: homeassistant
+    id: feels_like
+    entity_id: sensor.feels_like
+    on_value:
+      - lvgl.label.update:
+          id: feels_label
+          text: { format: "%.0f", args: [ 'x' ] }
+      - lvgl.label.update:
+          id: feels_label
+          text_color: !lambda |-
+            if (x < 0)  return lv_color_hex(0xCC66FF);
+            if (x < 32) return lv_color_hex(0x3D8BFD);
+            if (x < 50) return lv_color_hex(0x35C7EC);
+            if (x < 75) return lv_color_hex(0x00E400);
+            if (x < 85) return lv_color_hex(0xFFFF00);
+            if (x < 95) return lv_color_hex(0xFF7E00);
+            return lv_color_hex(0xFF0000);
+  - platform: homeassistant
+    id: wind_speed
+    entity_id: sensor.multisensor_wind_speed
+    on_value:
+      - lvgl.label.update:
+          id: wind_label
+          text: { format: "%.0f", args: [ 'x' ] }
+      - lvgl.label.update:
+          id: wind_label
+          text_color: !lambda |-
+            if (x < 10) return lv_color_hex(0x35C7EC);
+            if (x < 20) return lv_color_hex(0xFFFF00);
+            if (x < 30) return lv_color_hex(0xFF7E00);
+            if (x < 40) return lv_color_hex(0xFF0000);
+            return lv_color_hex(0x8F3F97);
+  - platform: homeassistant
+    id: wind_gust
+    entity_id: sensor.multisensor_wind_gust
+    on_value:
+      - lvgl.label.update:
+          id: gust_label
+          text: { format: "%.0f", args: [ 'x' ] }
+      - lvgl.label.update:
+          id: gust_label
+          text_color: !lambda |-
+            if (x < 10) return lv_color_hex(0x35C7EC);
+            if (x < 20) return lv_color_hex(0xFFFF00);
+            if (x < 30) return lv_color_hex(0xFF7E00);
+            if (x < 40) return lv_color_hex(0xFF0000);
+            return lv_color_hex(0x8F3F97);
+  - platform: homeassistant
+    id: rain_total
+    entity_id: sensor.rain_sensor_daily_rain_single_sensor
+    on_value:
+      - lvgl.label.update:
+          id: rain_label
+          text: { format: "%.2f", args: [ 'x' ] }
+  - platform: homeassistant
+    id: rain_rate
+    entity_id: sensor.tipping_bucket_rain_rate
+    on_value:
+      - lvgl.label.update:
+          id: rain_rate_label
+          text: { format: "rate %.2f in/hr", args: [ 'x' ] }
+  - platform: homeassistant
+    id: pressure
+    entity_id: sensor.basement_humidity_sea_level_pressure
+    on_value:
+      - lvgl.label.update:
+          id: pressure_label
+          text: { format: "%.2f inHg", args: [ 'x' ] }
+  - platform: homeassistant
+    id: uv
+    entity_id: sensor.multisensor_uv_index
+    on_value:
+      - lvgl.label.update:
+          id: uv_label
+          text: { format: "%.0f", args: [ 'x' ] }
+      - if:
+          condition: { lambda: 'return x < 3;' }
+          then:
+            - lvgl.label.update: { id: uv_label, text_color: 0x00E400 }
+            - lvgl.label.update: { id: uv_word, text: "LOW", text_color: 0x00E400 }
+          else:
+            - if:
+                condition: { lambda: 'return x < 6;' }
+                then:
+                  - lvgl.label.update: { id: uv_label, text_color: 0xFFFF00 }
+                  - lvgl.label.update: { id: uv_word, text: "MODERATE", text_color: 0xFFFF00 }
+                else:
+                  - if:
+                      condition: { lambda: 'return x < 8;' }
+                      then:
+                        - lvgl.label.update: { id: uv_label, text_color: 0xFF0000 }
+                        - lvgl.label.update: { id: uv_word, text: "HIGH", text_color: 0xFF0000 }
+                      else:
+                        - if:
+                            condition: { lambda: 'return x < 11;' }
+                            then:
+                              - lvgl.label.update: { id: uv_label, text_color: 0x8F3F97 }
+                              - lvgl.label.update: { id: uv_word, text: "VERY HIGH", text_color: 0x8F3F97 }
+                            else:
+                              - lvgl.label.update: { id: uv_label, text_color: 0x7E0023 }
+                              - lvgl.label.update: { id: uv_word, text: "EXTREME", text_color: 0x7E0023 }
+  - platform: homeassistant
+    id: aqi
+    entity_id: sensor.outdoors_outside_air_quality_pm_2_5_aqi
+    on_value:
+      - lvgl.label.update:
+          id: aqi_label
+          # "301+" while the ESPHome aqi bug pins at 301; shows exact value otherwise.
+          # After 2026.8 lands with extended_range, swap back to plain %.0f format.
+          text: !lambda 'return x >= 301 ? std::string("301") : str_sprintf("%.0f", x);'
+      - if:
+          condition: { lambda: 'return x <= 50;' }
+          then:
+            - lvgl.label.update: { id: aqi_label, text_color: 0x00E400 }
+            - lvgl.label.update: { id: aqi_word, text: "GOOD", text_color: 0x00E400 }
+          else:
+            - if:
+                condition: { lambda: 'return x <= 100;' }
+                then:
+                  - lvgl.label.update: { id: aqi_label, text_color: 0xFFFF00 }
+                  - lvgl.label.update: { id: aqi_word, text: "MODERATE", text_color: 0xFFFF00 }
+                else:
+                  - if:
+                      condition: { lambda: 'return x <= 150;' }
+                      then:
+                        - lvgl.label.update: { id: aqi_label, text_color: 0xFF7E00 }
+                        - lvgl.label.update: { id: aqi_word, text: "UNHEALTHY SG", text_color: 0xFF7E00 }
+                      else:
+                        - if:
+                            condition: { lambda: 'return x <= 200;' }
+                            then:
+                              - lvgl.label.update: { id: aqi_label, text_color: 0xFF0000 }
+                              - lvgl.label.update: { id: aqi_word, text: "UNHEALTHY", text_color: 0xFF0000 }
+                            else:
+                              - if:
+                                  condition: { lambda: 'return x <= 300;' }
+                                  then:
+                                    - lvgl.label.update: { id: aqi_label, text_color: 0x8F3F97 }
+                                    - lvgl.label.update: { id: aqi_word, text: "VERY UNHEALTHY", text_color: 0x8F3F97 }
+                                  else:
+                                    - lvgl.label.update: { id: aqi_label, text_color: 0x7E0023 }
+                                    - lvgl.label.update: { id: aqi_word, text: "HAZARDOUS", text_color: 0x7E0023 }
+  - platform: homeassistant
+    id: wind_deg
+    entity_id: sensor.multisensor_wind_direction
+    on_value:
+      - lvgl.indicator.update:
+          id: wind_needle
+          value: !lambda return (int) x;
+  - platform: homeassistant
+    id: lightning_dist
+    entity_id: sensor.lightning_detector_storm_distance
+    on_value:
+      - lvgl.label.update:
+          id: lightning_label
+          text: { format: "%.0f MI", args: [ 'x' ] }
+
+text_sensor:
+  - platform: homeassistant
+    id: comfort
+    entity_id: sensor.comfort_level
+    on_value:
+      - lvgl.label.update:
+          id: comfort_label
+          text: !lambda return x;
+      # Comfort face. States are mutually exclusive exact names, so each
+      # gets its own independent if (no else-nesting).
+      # Cold family (feels-like incl. wind chill, from HA template):
+      # Extreme/Brutal/Bitter/Cold/Chilly/Brisk — blue/purple tones.
+      # Warm family (dewpoint): Dry..Miserable — severity tones.
+      - if:
+          condition: { lambda: 'return x.find("Extreme") != std::string::npos;' }
+          then:
+            - lvgl.label.update: { id: comfort_icon, text: "\U000F069B", text_color: 0xFF00FF }
+            - lvgl.label.update: { id: comfort_label, text_color: 0xFF00FF }
+      - if:
+          condition: { lambda: 'return x.find("Brutal") != std::string::npos;' }
+          then:
+            - lvgl.label.update: { id: comfort_icon, text: "\U000F157D", text_color: 0x8F3F97 }
+            - lvgl.label.update: { id: comfort_label, text_color: 0x8F3F97 }
+      - if:
+          condition: { lambda: 'return x.find("Bitter") != std::string::npos;' }
+          then:
+            - lvgl.label.update: { id: comfort_icon, text: "\U000F0C6D", text_color: 0xCC66FF }
+            - lvgl.label.update: { id: comfort_label, text_color: 0xCC66FF }
+      - if:
+          condition: { lambda: 'return x.find("Cold") != std::string::npos;' }
+          then:
+            - lvgl.label.update: { id: comfort_icon, text: "\U000F01F8", text_color: 0x2979FF }
+            - lvgl.label.update: { id: comfort_label, text_color: 0x2979FF }
+      - if:
+          condition: { lambda: 'return x.find("Chilly") != std::string::npos;' }
+          then:
+            - lvgl.label.update: { id: comfort_icon, text: "\U000F10DF", text_color: 0x3D8BFD }
+            - lvgl.label.update: { id: comfort_label, text_color: 0x3D8BFD }
+      - if:
+          condition: { lambda: 'return x.find("Brisk") != std::string::npos;' }
+          then:
+            - lvgl.label.update: { id: comfort_icon, text: "\U000F01F6", text_color: 0x35C7EC }
+            - lvgl.label.update: { id: comfort_label, text_color: 0x35C7EC }
+      - if:
+          condition: { lambda: 'return x.find("Miserable") != std::string::npos;' }
+          then:
+            - lvgl.label.update: { id: comfort_icon, text: "\U000F069B", text_color: 0x7E0023 }
+            - lvgl.label.update: { id: comfort_label, text_color: 0x7E0023 }
+      - if:
+          condition: { lambda: 'return x.find("Oppressive") != std::string::npos;' }
+          then:
+            - lvgl.label.update: { id: comfort_icon, text: "\U000F157D", text_color: 0x8F3F97 }
+            - lvgl.label.update: { id: comfort_label, text_color: 0x8F3F97 }
+      - if:
+          condition: { lambda: 'return x.find("Muggy") != std::string::npos;' }
+          then:
+            - lvgl.label.update: { id: comfort_icon, text: "\U000F01F8", text_color: 0xFF0000 }
+            - lvgl.label.update: { id: comfort_label, text_color: 0xFF0000 }
+      - if:
+          condition: { lambda: 'return x.find("Sticky") != std::string::npos;' }
+          then:
+            - lvgl.label.update: { id: comfort_icon, text: "\U000F10DF", text_color: 0xFF7E00 }
+            - lvgl.label.update: { id: comfort_label, text_color: 0xFF7E00 }
+      - if:
+          condition: { lambda: 'return x.find("Pleasant") != std::string::npos;' }
+          then:
+            - lvgl.label.update: { id: comfort_icon, text: "\U000F01F2", text_color: 0x00E400 }
+            - lvgl.label.update: { id: comfort_label, text_color: 0x00E400 }
+      - if:
+          condition: { lambda: 'return x.find("Comfortable") != std::string::npos;' }
+          then:
+            - lvgl.label.update: { id: comfort_icon, text: "\U000F01F5", text_color: 0x00E400 }
+            - lvgl.label.update: { id: comfort_label, text_color: 0x00E400 }
+      - if:
+          condition: { lambda: 'return x.find("Dry") != std::string::npos;' }
+          then:
+            - lvgl.label.update: { id: comfort_icon, text: "\U000F01F6", text_color: 0xFFFF00 }
+  - platform: homeassistant
+    id: wx_cond
+    entity_id: weather.weather_station
+    on_value:
+      - lvgl.label.update:
+          id: cond_icon
+          text: !lambda |-
+            if (x == "sunny")            return std::string("\U000F0599");
+            if (x == "clear-night")      return std::string("\U000F0594");
+            if (x == "cloudy")           return std::string("\U000F0590");
+            if (x == "partlycloudy")     return std::string("\U000F0595");
+            if (x == "fog")              return std::string("\U000F0591");
+            if (x == "hail")             return std::string("\U000F0592");
+            if (x == "lightning")        return std::string("\U000F0593");
+            if (x == "lightning-rainy")  return std::string("\U000F067E");
+            if (x == "pouring")          return std::string("\U000F0596");
+            if (x == "rainy")            return std::string("\U000F0597");
+            if (x == "snowy")            return std::string("\U000F0598");
+            if (x == "snowy-rainy")      return std::string("\U000F067F");
+            if (x == "windy" || x == "windy-variant") return std::string("\U000F059D");
+            return std::string("\U000F0026");
+  - platform: homeassistant
+    id: press_trend
+    entity_id: sensor.pressure_tendency
+    on_value:
+      - lvgl.label.update:
+          id: trend_icon
+          text: !lambda |-
+            if (x.find("rising") != std::string::npos)  return std::string("\U000F0535");
+            if (x.find("falling") != std::string::npos) return std::string("\U000F0533");
+            return std::string("\U000F0534");
+  # Flattened NWS alert event/severity (HA template sensors — see
+  # configuration.yaml — since sensor.nws_alert_raw only exposes these
+  # nested inside its "features[].properties" attribute, which
+  # ESPHome's homeassistant platform can't reach directly).
+  - platform: homeassistant
+    id: nws_event
+    entity_id: sensor.nws_alert_event
+    on_value:
+      # A different event means a new alert: clear any tap-ack so the
+      # icon flashes again for it.
+      - globals.set: { id: alert_acked, value: 'false' }
+      - script.execute: update_nws_alert
+  - platform: homeassistant
+    id: nws_severity
+    entity_id: sensor.nws_alert_severity
+    on_value: [ script.execute: update_nws_alert ]
+
+binary_sensor:
+  - platform: homeassistant
+    id: lightning_nearby
+    entity_id: binary_sensor.lightning_nearby
+    on_state:
+      - if:
+          condition:
+            and:
+              - binary_sensor.is_on: lightning_nearby
+              - binary_sensor.is_on: lightning_corroborated
+          then: [ lvgl.widget.show: lightning_alert ]
+          else:
+            - lvgl.widget.hide: lightning_alert
+            # Lightning cleared: re-arm the local tap-ack
+            - globals.set: { id: lightning_acked, value: 'false' }
+  # Corroboration signal (HA-side): true only when the most recent
+  # strike-counter increment was backed by local rain/pressure evidence
+  # or fell within a clustered burst — filters out isolated increments
+  # the AS3935 chip mislabels as "strike" (e.g. smoke-induced static).
+  # Combined (AND) with lightning_nearby above to decide the alert icon.
+  - platform: homeassistant
+    id: lightning_corroborated
+    entity_id: binary_sensor.lightning_strike_corroborated
+    on_state:
+      - if:
+          condition:
+            and:
+              - binary_sensor.is_on: lightning_nearby
+              - binary_sensor.is_on: lightning_corroborated
+          then: [ lvgl.widget.show: lightning_alert ]
+          else:
+            - lvgl.widget.hide: lightning_alert
+            - globals.set: { id: lightning_acked, value: 'false' }
+  - platform: homeassistant
+    id: data_stale
+    entity_id: binary_sensor.weather_data_stale
+    on_state:
+      - if:
+          condition: { binary_sensor.is_on: data_stale }
+          then: [ lvgl.widget.show: stale_banner ]
+          else: [ lvgl.widget.hide: stale_banner ]
+  # NWS alerts: covers_home toggles the icon; the raw alert's
+  # severity/event attributes (see text_sensor block) pick its look.
+  - platform: homeassistant
+    id: nws_covers_home
+    entity_id: binary_sensor.nws_alert_covers_home
+    on_state:
+      - if:
+          condition: { binary_sensor.is_on: nws_covers_home }
+          then:
+            - script.execute: update_nws_alert
+            - lvgl.widget.show: nws_alert
+          else:
+            - lvgl.widget.hide: nws_alert
+            # Alert cleared: re-arm the local tap-ack for next time
+            - globals.set: { id: alert_acked, value: 'false' }
+
+# Re-applies current sensor states to the overlay/icon widgets.
+# Called from on_boot (see esphome.on_boot) to cover the case where
+# homeassistant-platform entities are already true/set at boot but
+# didn't fire their on_state/on_value trigger for that first push.
+script:
+  - id: resync_alerts
+    then:
+      - if:
+          condition:
+            and:
+              - binary_sensor.is_on: lightning_nearby
+              - binary_sensor.is_on: lightning_corroborated
+          then: [ lvgl.widget.show: lightning_alert ]
+          else: [ lvgl.widget.hide: lightning_alert ]
+      - if:
+          condition: { binary_sensor.is_on: nws_covers_home }
+          then:
+            - script.execute: update_nws_alert
+            - lvgl.widget.show: nws_alert
+          else: [ lvgl.widget.hide: nws_alert ]
+      - if:
+          condition: { binary_sensor.is_on: data_stale }
+          then: [ lvgl.widget.show: stale_banner ]
+          else: [ lvgl.widget.hide: stale_banner ]
+  - id: update_nws_alert
+    then:
+      # Track whether the displayed alert is a PDS (HA-side template
+      # prefixes the event with "PDS ") — drives the fast word+icon flash.
+      - lambda: |-
+          std::string e = id(nws_event).state;
+          e.erase(0, e.find_first_not_of(" \t\n\r"));
+          id(pds_active) = e.rfind("PDS ", 0) == 0;
+      - lvgl.label.update:
+          id: nws_alert_word
+          text: !lambda |-
+            std::string s = id(nws_event).state;
+            s.erase(0, s.find_first_not_of(" \t\n\r"));
+            s.erase(s.find_last_not_of(" \t\n\r") + 1);
+            for (auto &c : s) c = toupper(c);
+            return s;
+      # Pick an icon matching the exact official NWS alert title.
+      # Falls back to a generic alert triangle for anything not listed.
+      - lvgl.label.update:
+          id: nws_icon
+          text: !lambda |-
+            std::string e = id(nws_event).state;
+            // Trim whitespace the HA Jinja template may leave around the
+            // value — the matches below are exact, so a stray space would
+            // silently drop every alert to the generic triangle.
+            e.erase(0, e.find_first_not_of(" \t\n\r"));
+            e.erase(e.find_last_not_of(" \t\n\r") + 1);
+            // Strip the "PDS " prefix so a PDS Tornado Warning still
+            // resolves to the tornado glyph.
+            if (e.rfind("PDS ", 0) == 0) e.erase(0, 4);
+            if (e == "Winter Storm Watch" || e == "Winter Storm Warning" ||
+                e == "Snow Squall Warning")
+              return std::string("\U000F0F36");
+            if (e == "Blizzard Warning")
+              return std::string("\U000F0F29");
+            if (e == "Ice Storm Warning")
+              return std::string("\U000F1502");
+            if (e == "Winter Weather Advisory")
+              return std::string("\U000F0598");
+            if (e == "Freeze Watch" || e == "Freeze Warning" || e == "Frost Advisory" ||
+                e == "Cold Weather Advisory" || e == "Extreme Cold Warning")
+              return std::string("\U000F0E01");
+            if (e == "Fire Weather Watch" || e == "Red Flag Warning")
+              return std::string("\U000F15D7");
+            if (e == "Dense Fog Advisory")
+              return std::string("\U000F0591");
+            if (e == "High Wind Watch" || e == "High Wind Warning" || e == "Wind Advisory" ||
+                e == "Extreme Wind Warning" || e == "Marine" || e == "Small Craft Advisory" ||
+                e == "Gale Warning" || e == "Storm Warning" ||
+                e == "Hurricane Force Wind Warning" || e == "Special Marine Warning")
+              return std::string("\U000F059D");
+            if (e == "Severe Thunderstorm Watch" || e == "Severe Thunderstorm Warning")
+              return std::string("\U000F0593");
+            if (e == "Tornado Watch" || e == "Tornado Warning")
+              return std::string("\U000F0F38");
+            if (e == "Coastal Flood Watch" || e == "Coastal Flood Warning" ||
+                e == "Coastal Flood Advisory" || e == "Flood Watch" ||
+                e == "Flash Flood Warning" || e == "Flood Warning" ||
+                e == "River Flood Watch" || e == "River Flood Warning")
+              return std::string("\U000F0EFA");
+            if (e == "Extreme Heat Watch" || e == "Extreme Heat Warning" ||
+                e == "Heat Advisory")
+              return std::string("\U000F0F37");
+            if (e == "Tropical Storm Watch" || e == "Tropical Storm Warning" ||
+                e == "Hurricane Watch" || e == "Hurricane Warning")
+              return std::string("\U000F0898");
+            if (e == "Storm Surge Watch")
+              return std::string("\U000F185A");
+            if (e == "Air Quality" || e == "Air Quality Alert" || e == "Haze")
+              return std::string("\U000F0A71");
+            if (e == "Smoke")
+              return std::string("\U000F1799");
+            if (e == "Dust")
+              return std::string("\U000F1B5A");
+            return std::string("\U000F0026");
+      - if:
+          condition: { lambda: 'return id(nws_severity).state == "Extreme";' }
+          then:
+            - lvgl.label.update: { id: nws_alert_word, text_color: 0x7E0023 }
+            - lvgl.label.update: { id: nws_icon, text_color: 0x7E0023 }
+          else:
+            - if:
+                condition: { lambda: 'return id(nws_severity).state == "Severe";' }
+                then:
+                  - lvgl.label.update: { id: nws_alert_word, text_color: 0xFF0000 }
+                  - lvgl.label.update: { id: nws_icon, text_color: 0xFF0000 }
+                else:
+                  - if:
+                      condition: { lambda: 'return id(nws_severity).state == "Moderate";' }
+                      then:
+                        - lvgl.label.update: { id: nws_alert_word, text_color: 0xFF7E00 }
+                        - lvgl.label.update: { id: nws_icon, text_color: 0xFF7E00 }
+                      else:
+                          - if:
+                              condition: { lambda: 'return id(nws_severity).state == "Minor";' }
+                              then:
+                                - lvgl.label.update: { id: nws_alert_word, text_color: 0xFFFF00 }
+                                - lvgl.label.update: { id: nws_icon, text_color: 0xFFFF00 }
+                              else:
+                                # Unknown/unset severity
+                                - lvgl.label.update: { id: nws_alert_word, text_color: 0xFF00FF }
+                                - lvgl.label.update: { id: nws_icon, text_color: 0xFF00FF }
+
+# Belt-and-suspenders resync: the on_boot pass (above) can still miss
+# an initial push that lands later than expected, so keep re-applying
+# current sensor state on a timer instead of betting on a fixed delay.
+interval:
+  - interval: 30s
+    then: [ script.execute: resync_alerts ]
+  # Blink driver: alert icons flash while active (NWS: until tap-acked),
+  # rain amount pulses while rain is falling. Normal alerts blink the
+  # icon only at 500ms; a PDS alert blinks icon AND title word at the
+  # faster 250ms rate for a clearly distinct look.
+  - interval: 250ms
+    then:
+      - lambda: |-
+          id(blink_fast) = !id(blink_fast);
+          if (id(blink_fast)) id(blink_phase) = !id(blink_phase);
+      - if:
+          condition:
+            and:
+              - binary_sensor.is_on: lightning_nearby
+              - binary_sensor.is_on: lightning_corroborated
+              - lambda: 'return !id(lightning_acked);'
+          then:
+            - if:
+                condition: { lambda: 'return id(blink_phase);' }
+                then: [ lvgl.widget.show: lightning_icon ]
+                else: [ lvgl.widget.hide: lightning_icon ]
+          else: [ lvgl.widget.show: lightning_icon ]
+      - if:
+          condition:
+            and:
+              - binary_sensor.is_on: nws_covers_home
+              - lambda: 'return !id(alert_acked);'
+          then:
+            - if:
+                condition: { lambda: 'return id(pds_active) ? id(blink_fast) : id(blink_phase);' }
+                then: [ lvgl.widget.show: nws_icon ]
+                else: [ lvgl.widget.hide: nws_icon ]
+            - if:
+                condition: { lambda: 'return !id(pds_active) || id(blink_fast);' }
+                then: [ lvgl.widget.show: nws_alert_word ]
+                else: [ lvgl.widget.hide: nws_alert_word ]
+          else:
+            - lvgl.widget.show: nws_icon
+            - lvgl.widget.show: nws_alert_word
+      - if:
+          condition: { lambda: 'return id(rain_rate).has_state() && id(rain_rate).state > 0;' }
+          then:
+            - lvgl.label.update:
+                id: rain_label
+                text_color: !lambda 'return id(blink_phase) ? lv_color_hex(0x3D8BFD) : lv_color_hex(0x1A4D8F);'
+          else:
+            - lvgl.label.update: { id: rain_label, text_color: 0x3D8BFD }
+
+# ── Console face ────────────────────────────────────────────
+# Zone grid: 3 cols x 2 rows, 2px borders, header strips.
+# Zone identity colors: outdoor green 0x7CD432, wind cyan 0x35C7EC,
+#         rain blue 0x3D8BFD, headers grey.
+# Severity scale (EPA/NWS): green 0x00E400, yellow 0xFFFF00,
+#         orange 0xFF7E00, red 0xFF0000, purple 0x8F3F97,
+#         maroon 0x7E0023, unknown magenta 0xFF00FF.
+lvgl:
+  buffer_size: 100%
+  byte_order: little_endian
+  bottom_layer:
+    widgets:
+      - obj:
+          width: 100%
+          height: 100%
+          bg_color: 0x000000
+  pages:
+    - id: main_page
+      bg_color: 0x000000
+      widgets:
+
+        # ════ Row 1 ════
+        # FORECAST zone
+        - obj: &zone
+            x: 6
+            y: 6
+            width: 336
+            height: 322
+            bg_color: 0x000000
+            radius: 0
+            border_width: 2
+            border_color: 0x3a3a3a
+            pad_all: 0
+            widgets:
+              - label: { text: "FORECAST", align: TOP_MID, y: 8, text_font: hdr, text_color: 0xbbbbbb }
+              - label:
+                  id: cond_icon
+                  text: "\U000F0595"
+                  align: CENTER
+                  y: -34
+                  text_font: mdi_xl
+                  text_color: 0xffffff
+              - label:
+                  id: comfort_icon
+                  text: "\U000F01F6"
+                  align: BOTTOM_MID
+                  y: -42
+                  text_font: mdi_face
+                  text_color: 0x999999
+              - label:
+                  id: comfort_label
+                  text: "..."
+                  align: BOTTOM_MID
+                  y: -10
+                  text_font: unit_sm
+                  text_color: 0xd9a514
+
+        # OUTDOOR zone
+        - obj:
+            <<: *zone
+            x: 344
+            widgets:
+              - label: { text: "OUTDOOR", align: TOP_MID, y: 8, text_font: hdr, text_color: 0xbbbbbb }
+              - label:
+                  id: temp_label
+                  text: "0.0"
+                  x: 14
+                  y: 56
+                  text_font: seg_xl
+                  text_color: 0x7CD432
+              - label: { text: "°F", x: 282, y: 56, text_font: unit_lg, text_color: 0x7CD432 }
+              - label:
+                  id: rh_label
+                  text: "0"
+                  x: 60
+                  y: 196
+                  text_font: seg_lg
+                  text_color: 0x7CD432
+              - label: { text: "%", x: 200, y: 200, text_font: unit_lg, text_color: 0x7CD432 }
+              - label: { text: "HUMIDITY", x: 200, y: 238, text_font: unit_sm, text_color: 0x777777 }
+              - label:
+                  id: pressure_label
+                  text: "--.-- inHg"
+                  align: BOTTOM_LEFT
+                  x: 14
+                  y: -10
+                  text_font: unit_sm
+                  text_color: 0x999999
+              - label:
+                  id: trend_icon
+                  text: "\U000F0534"
+                  align: BOTTOM_RIGHT
+                  x: -12
+                  y: -8
+                  text_font: mdi_sm
+                  text_color: 0x7F77DD
+
+        # WIND zone
+        - obj:
+            <<: *zone
+            x: 682
+            widgets:
+              - label: { text: "WIND", align: TOP_MID, y: 8, text_font: hdr, text_color: 0xbbbbbb }
+              - label: { text: "CURRENT MPH", x: 16, y: 40, text_font: unit_sm, text_color: 0x35C7EC }
+              - label:
+                  id: wind_label
+                  text: "0"
+                  x: 16
+                  y: 66
+                  text_font: seg_lg
+                  text_color: 0x35C7EC
+              - label: { text: "GUST 1HR", x: 16, y: 150, text_font: unit_sm, text_color: 0x35C7EC }
+              - label:
+                  id: gust_label
+                  text: "0"
+                  x: 16
+                  y: 176
+                  text_font: seg_md
+                  text_color: 0x35C7EC
+              - label: { text: "FEELS LIKE", x: 16, y: 240, text_font: unit_sm, text_color: 0x7CD432 }
+              - label:
+                  id: feels_label
+                  text: "0"
+                  x: 16
+                  y: 264
+                  text_font: seg_md
+                  text_color: 0x7CD432
+              # Compass: 360° meter, needle driven by degrees,
+              # N/E/S/W overlaid on top, no dynamic text inside
+              - meter:
+                  x: 180
+                  y: 84
+                  width: 150
+                  height: 150
+                  bg_color: 0x000000
+                  border_width: 2
+                  border_color: 0x666666
+                  radius: 75
+                  scales:
+                    - range_from: 0
+                      range_to: 360
+                      angle_range: 360
+                      rotation: 270      # 0° = up = north
+                      ticks:
+                        count: 2
+                      indicators:
+                        - line:
+                            id: wind_needle
+                            width: 4
+                            color: 0xFF0000
+                            length: -10
+                            value: 0
+              - label: { text: "N", x: 248, y: 90, text_font: unit_sm, text_color: 0x999999 }
+              - label: { text: "S", x: 249, y: 206, text_font: unit_sm, text_color: 0x999999 }
+              - label: { text: "E", x: 306, y: 148, text_font: unit_sm, text_color: 0x999999 }
+              - label: { text: "W", x: 190, y: 148, text_font: unit_sm, text_color: 0x999999 }
+              - label: { text: "NE", x: 287, y: 108, text_font: unit_sm, text_color: 0x666666 }
+              - label: { text: "SE", x: 287, y: 190, text_font: unit_sm, text_color: 0x666666 }
+              - label: { text: "SW", x: 205, y: 190, text_font: unit_sm, text_color: 0x666666 }
+              - label: { text: "NW", x: 205, y: 108, text_font: unit_sm, text_color: 0x666666 }
+
+        # ════ Row 2 ════
+        # AQI / UV zone: AQI headline up top, UV reading lower-left
+        - obj:
+            <<: *zone
+            y: 334
+            height: 260
+            widgets:
+              - label: { text: "AQI / UV", align: TOP_MID, y: 8, text_font: hdr, text_color: 0xbbbbbb }
+              - label:
+                  id: aqi_label
+                  text: "0"
+                  x: 14
+                  y: 46
+                  text_font: seg_lg
+                  text_color: 0x00E400
+              - label: { text: "AQI", x: 216, y: 54, text_font: unit_lg, text_color: 0x999999 }
+              - label:
+                  id: aqi_word
+                  text: "---"
+                  x: 216
+                  y: 92
+                  text_font: unit_sm
+                  text_color: 0x00E400
+              - label:
+                  id: uv_label
+                  text: "0"
+                  x: 14
+                  y: 156
+                  width: 190
+                  text_align: CENTER
+                  text_font: seg_lg
+                  text_color: 0x00E400
+              - label: { text: "UV INDEX", x: 216, y: 164, text_font: unit_sm, text_color: 0x777777 }
+              - label:
+                  id: uv_word
+                  text: "---"
+                  x: 216
+                  y: 192
+                  text_font: unit_sm
+                  text_color: 0x00E400
+
+        # ALERTS zone (was SUN): lightning-nearby + NWS alert icons,
+        # hidden until the corresponding binary_sensor goes active
+        - obj:
+            <<: *zone
+            x: 344
+            y: 334
+            height: 260
+            widgets:
+              - label: { text: "ALERTS", align: TOP_MID, y: 8, text_font: hdr, text_color: 0xbbbbbb }
+              - obj:
+                  id: lightning_alert
+                  hidden: true
+                  x: 20
+                  y: 55
+                  width: 140
+                  height: 190
+                  bg_opa: TRANSP
+                  border_width: 0
+                  pad_all: 0
+                  clickable: true
+                  # Tap-to-ack (local only): stops the flash; the icon
+                  # stays solid while lightning remains nearby.
+                  on_click:
+                    - globals.set: { id: lightning_acked, value: 'true' }
+                    - lvgl.widget.show: lightning_icon
+                  widgets:
+                    - label:
+                        id: lightning_icon
+                        text: "\U000F0241"
+                        align: TOP_MID
+                        y: 8
+                        text_font: mdi_alert
+                        text_color: 0xFF7E00
+                    - label:
+                        id: lightning_label
+                        text: "-- MI"
+                        align: BOTTOM_MID
+                        y: -4
+                        text_font: unit_sm
+                        text_color: 0xFF7E00
+              - obj:
+                  id: nws_alert
+                  hidden: true
+                  x: 176
+                  y: 55
+                  width: 140
+                  height: 190
+                  bg_opa: TRANSP
+                  border_width: 0
+                  pad_all: 0
+                  clickable: true
+                  # Tap-to-ack: silences the HA alert's repeat notifies
+                  # (it re-arms on the next trigger) and stops the local
+                  # icon flash until the alert clears or a new one lands.
+                  on_click:
+                    - homeassistant.action:
+                        action: alert.turn_off
+                        data:
+                          entity_id: alert.nws_advisory
+                    - globals.set: { id: alert_acked, value: 'true' }
+                    - lvgl.widget.show: nws_icon
+                  widgets:
+                    - label:
+                        id: nws_icon
+                        text: "\U000F0026"
+                        align: TOP_MID
+                        y: 8
+                        text_font: mdi_alert
+                        text_color: 0xFF00FF
+                    - label:
+                        id: nws_alert_word
+                        text: "ADVISORY"
+                        align: BOTTOM_MID
+                        y: -4
+                        width: 136
+                        text_align: CENTER
+                        long_mode: WRAP
+                        text_font: unit_xs
+                        text_color: 0xFF00FF
+
+        # RAIN zone
+        - obj:
+            <<: *zone
+            x: 682
+            y: 334
+            height: 260
+            widgets:
+              - label: { text: "RAIN", align: TOP_MID, y: 8, text_font: hdr, text_color: 0xbbbbbb }
+              - label:
+                  id: rain_label
+                  text: "0.00"
+                  x: 14
+                  y: 70
+                  text_font: seg_xl
+                  text_color: 0x3D8BFD
+              - label: { text: "in", x: 286, y: 130, text_font: unit_lg, text_color: 0x3D8BFD }
+              - label: { text: "24-HR", x: 16, y: 186, text_font: unit_sm, text_color: 0x777777 }
+              - label:
+                  id: rain_rate_label
+                  text: "rate 0.00 in/hr"
+                  align: BOTTOM_LEFT
+                  x: 14
+                  y: -12
+                  text_font: unit_sm
+                  text_color: 0x999999
+
+        # ── Overlay banner (hidden) ──
+        - obj:
+            id: stale_banner
+            hidden: true
+            x: 112
+            y: 260
+            width: 800
+            height: 80
+            bg_color: 0x8a2020
+            radius: 8
+            border_width: 2
+            border_color: 0xcc4444
+            widgets:
+              - label:
+                  text: "\U000F0026  SENSOR DATA STALE — CHECK RTL_433 / MQTT"
+                  align: CENTER
+                  text_font: unit_lg
+                  text_color: 0xFFFFFF
