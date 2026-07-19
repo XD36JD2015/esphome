@@ -16,9 +16,8 @@
 # ============================================================
 
 substitutions:
-  fallback_ap_password: "R83f4s9+H+VGK4YeEZGL85C0SrKwzX1UES0NE8y9Wc="
-  # Generate with:  openssl rand -base64 32
-  ha_encryption_key: "7Et7uFExgcpPfT1Ht0JKaqRzGprSxf06r9YIwSfcS2U="
+  fallback_ap_password: !secret weather_display_fallback_ap_password
+  ha_encryption_key: !secret weather_display_api_key
 
 esphome:
   name: weather-display

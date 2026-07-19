@@ -7,13 +7,13 @@ substitutions:
   name_add_mac_suffix: "false"  # Must have quotes around value
 
 # Enable Home Assistant API
-api:  
+api:
   encryption:
-    key: "Jy0KB6q2DNF2kZcy9wAKEoT23qTLLGTaGkt6jN77su0="
+    key: !secret inside_air_quality_api_key
 
 ota:
   - platform: esphome
-    password: "T56nhpmkUcyFJe1n0Y4rawwWeBaym9LHKHsrCj40SUA="
+    password: !secret inside_air_quality_ota_password
 
 wifi:
   ssid: !secret wifi_ssid3

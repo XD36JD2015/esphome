@@ -18,11 +18,11 @@ logger:
 # Enable Home Assistant API
 api:
   encryption:
-    key: "IwVeO+ulWS7SHsBUhnRV/4n9BuwaNsJvduN6PgKjcLs="
+    key: !secret basement_humidity_api_key
 
 ota:
   - platform: esphome
-    password: "ad5f732d2f8ecd85cd15298d44068f86"
+    password: !secret basement_humidity_ota_password
 
 wifi:
   ssid: !secret wifi_ssid3

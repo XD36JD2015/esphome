@@ -179,13 +179,13 @@ logger:
 
 api:
   encryption:
-     key: "qb02zm9QvD5i5PxJfvKvo2VZgHOtViKmaJ3ZPA/d7vs="
-  custom_services: true 
+     key: !secret alarm_system_api_key
+  custom_services: true
 
-safe_mode: 
-  
+safe_mode:
+
 ota:
-   password: "GWz5hWKsiSHrK+r9LDmzoGFr+RXuAPoWxJL3iEn3Uu0="
+   password: !secret alarm_system_ota_password
    platform: esphome
    on_begin:
           switch.turn_off: connection_status_switch 

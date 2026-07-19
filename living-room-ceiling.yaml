@@ -44,7 +44,7 @@ api:
 
 ota:
   platform: esphome
-  password: NJKrg438o#$#4BNJDF
+  password: !secret ota_password
 
 wifi:
   ssid: !secret wifi_ssid3

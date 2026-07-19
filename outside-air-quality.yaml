@@ -9,13 +9,13 @@ substitutions:
 
 
 # Enable Home Assistant API
-api:  
+api:
   encryption:
-    key: "qIomy/T9q7QHmrTAl7wayi5DFlNQErVkQNGl7kIvSs8="
+    key: !secret outside_air_quality_api_key
 
 ota:
   - platform: esphome
-    password: "DrbZsvOiu1sFD/rsvRGzGymy1CmK11fdDqIZSOFCai8="
+    password: !secret outside_air_quality_ota_password
 
 wifi:
   ssid: !secret wifi_ssid3

@@ -32,12 +32,12 @@ logger:
 # Enable Home Assistant API
 api:
   encryption:
-    key: "GiotK2BUX22tdRwx8C+TwewPEV4PWdl65R73878GyNo="
+    key: !secret shop_power_meter_key
 
 ota:
   platform: esphome
-  id: 
-  password: "d707127e2d52ed04ec6328b713edf8df"
+  id:
+  password: !secret shop_power_meter_ota
 
 wifi:
   ssid: !secret wifi_ssid
@@ -53,7 +53,7 @@ wifi:
   # Enable fallback hotspot (captive portal) in case wifi connection fails
 #  ap:
 #    ssid: "House-Power-Meter"
-#    password: "JaWQjtWCFM9p"
+#    password: !secret ap_wifi_password
 
 i2c:
   sda:

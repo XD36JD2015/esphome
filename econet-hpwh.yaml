@@ -17,11 +17,11 @@ esphome:
 
 ota:
   - platform: esphome
-    password: "dNjZp8iGUvybxXU/bkerj3QpZKzW8TaN8KNOL9CauFE="
+    password: !secret econet_hpwh_ota_password
 
 api:
   encryption:
-    key: 5UwCijcVwVVko9TNUek+szlB8oU2S8/dulomN6/l+DQ=
+    key: !secret econet_hpwh_api_key
 
 wifi:
   ssid: !secret wifi_ssid

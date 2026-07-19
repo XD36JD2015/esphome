@@ -40,11 +40,11 @@ logger:
 # Enable Home Assistant API
 api:
   encryption:
-    key: "5px2IUmeMF5YSDKEMICxWBCP75VALbFNWqT1nW8jJXc="
+    key: !secret bedroom_ceiling_fan_api_key
 
 ota:
   platform: esphome
-  password: "ad5f732d2f8ecd85cd15298d44068f86"
+  password: !secret bedroom_ceiling_fan_ota_password
 
 wifi:
   ssid: !secret wifi_ssid3
