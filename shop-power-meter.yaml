@@ -36,7 +36,6 @@ api:
 
 ota:
   platform: esphome
-  id:
   password: !secret shop_power_meter_ota
 
 wifi:
@@ -149,7 +148,7 @@ sensor:
           filters: [*moving_avg, *pos]
           id: phase_a_voltage
         frequency:
-          name: "Phase B Frequency"
+          name: "Phase A Frequency"
           filters: [*moving_avg, *pos]
       # Verify that this specific phase/leg is connected to correct input wire color on device listed below
       - id: phase_b
@@ -163,7 +162,7 @@ sensor:
           filters: [*moving_avg, *pos]
           id: phase_b_voltage
         phase_angle:
-          name: "Phase A Phase Angle"
+          name: "Phase B Phase Angle"
           filters: [*moving_avg, *pos]
     ct_clamps:
       # Do not specify a name for any of the power sensors here, only an id. This leaves the power sensors internal to ESPHome.

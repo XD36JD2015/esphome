@@ -3,7 +3,6 @@ substitutions:
   name: "alarm-system-shop" #unique network name, system name
   friendlyName: "Shop Alarm System"  #used as the friendly name of your application in HomeAssistant
   panelId: "alarm_system_shop"         #used as the service variable name.
-  accesscode: !secret access_code #Only comes into effect if needed for arming and quickarm is not set
   device_description: Shop Alarm System
 
 vista_alarm_panel:

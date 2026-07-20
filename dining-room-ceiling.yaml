@@ -51,9 +51,6 @@ wifi:
   password: !secret wifi_password3
   fast_connect: on
   domain: .browncowalliance.io
-  ap:
-    ssid: "$systemName"
-    password: !secret wifi_password
 
 #web_server:
 #  port: 80

@@ -111,6 +111,8 @@ sensor:
   - platform: template
     name: "Sea Level Pressure"
     unit_of_measurement: "inHg"
+    device_class: pressure
+    state_class: measurement
     accuracy_decimals: 2
     update_interval: 60s
     lambda: |-

@@ -16,7 +16,6 @@
 # ============================================================
 
 substitutions:
-  fallback_ap_password: !secret weather_display_fallback_ap_password
   ha_encryption_key: !secret weather_display_api_key
 
 esphome:
@@ -92,11 +91,6 @@ wifi:
   domain: .browncowalliance.io
   fast_connect: on
   min_auth_mode: WPA2
-  ap:
-    ssid: "weather-display-setup"
-    password: $fallback_ap_password
-
-captive_portal:
 
 update:
   - platform: esp32_hosted
@@ -511,6 +505,7 @@ text_sensor:
           condition: { lambda: 'return x.find("Dry") != std::string::npos;' }
           then:
             - lvgl.label.update: { id: comfort_icon, text: "\U000F01F6", text_color: 0xFFFF00 }
+            - lvgl.label.update: { id: comfort_label, text_color: 0xFFFF00 }
   - platform: homeassistant
     id: wx_cond
     entity_id: weather.weather_station
