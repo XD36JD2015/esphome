@@ -541,28 +541,41 @@ binary_sensor:
     trigger_on_initial_state: true
 
 #shop fire zone action
+# Echo guard: only mirror the shop's fire alarm in while our own fire
+# output is idle — if we're already alarming, the shop's alarm is our
+# own echo and mirroring it back would re-trigger us after acknowledge,
+# leaving both panels endlessly re-tripping each other.
   - platform: homeassistant
     id: shop_fire
     entity_id: binary_sensor.alarm_system_shop_fire_1
     trigger_on_initial_state: true
     on_press:
-      lambda: |-
-        $panelId->set_zone_fault(41,1);
+      - if:
+          condition:
+            binary_sensor.is_off: fire_1
+          then:
+            - lambda: |-
+                $panelId->set_zone_fault(41,1);
     on_release:
-      lambda: |-
-        $panelId->set_zone_fault(41,0);
+      - lambda: |-
+          $panelId->set_zone_fault(41,0);
 
   #shop alarm zone action
+  # Echo guard: see shop_fire comment above.
   - platform: homeassistant
     id: shop_alarm
     entity_id: binary_sensor.alarm_system_shop_alm_1
     trigger_on_initial_state: true
     on_press:
-      lambda: |-
-        $panelId->set_zone_fault(42,1);
+      - if:
+          condition:
+            binary_sensor.is_off: alm_1
+          then:
+            - lambda: |-
+                $panelId->set_zone_fault(42,1);
     on_release:
-      lambda: |-
-        $panelId->set_zone_fault(42,0);
+      - lambda: |-
+          $panelId->set_zone_fault(42,0);
 
   #shop man door zone action
   - platform: homeassistant
@@ -576,11 +589,18 @@ binary_sensor:
       lambda: |-
         $panelId->set_zone_fault(44,0);
 
-  #shop garage door zone action
-  - platform: homeassistant
-    id: shop_left_door
-    entity_id: binary_sensor.alarm_system_shop_z3
+  #shop garage doors combined zone action: zone 45 stays faulted until
+  #BOTH doors are closed (previously either door's on_release cleared
+  #the fault while the other door was still open)
+  - platform: template
+    id: shop_garage_doors
     trigger_on_initial_state: true
+    lambda: |-
+      if (id(shop_left_door).state || id(shop_right_door).state) {
+        return true;
+      } else {
+        return false;
+      }
     on_press:
       lambda: |-
         $panelId->set_zone_fault(45,1);
@@ -588,17 +608,17 @@ binary_sensor:
       lambda: |-
         $panelId->set_zone_fault(45,0);
 
-  #shop garage door zone action
+  #shop garage door zone
+  - platform: homeassistant
+    id: shop_left_door
+    entity_id: binary_sensor.alarm_system_shop_z3
+    trigger_on_initial_state: true
+
+  #shop garage door zone
   - platform: homeassistant
     id: shop_right_door
     entity_id: binary_sensor.alarm_system_shop_z6
     trigger_on_initial_state: true
-    on_press:
-      lambda: |-
-        $panelId->set_zone_fault(45,1);
-    on_release:
-      lambda: |-
-        $panelId->set_zone_fault(45,0);
 
 #### text sensors ####
 text_sensor:

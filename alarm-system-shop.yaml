@@ -395,28 +395,41 @@ binary_sensor:
     trigger_on_initial_state: true
 
 #house fire zone
+# Echo guard: only mirror the house's fire alarm in while our own fire
+# output is idle — if we're already alarming, the house's alarm is our
+# own echo and mirroring it back would re-trigger us after acknowledge,
+# leaving both panels endlessly re-tripping each other.
   - platform: homeassistant
     id: house_fire
     entity_id: binary_sensor.alarm_system_fire_1
     trigger_on_initial_state: true
     on_press:
-      lambda: |-
-        $panelId->set_zone_fault(10,1);
+      - if:
+          condition:
+            binary_sensor.is_off: fire_1
+          then:
+            - lambda: |-
+                $panelId->set_zone_fault(10,1);
     on_release:
-      lambda: |-
-        $panelId->set_zone_fault(10,0);
+      - lambda: |-
+          $panelId->set_zone_fault(10,0);
 
 #house alarm zone
+# Echo guard: see house_fire comment above.
   - platform: homeassistant
     id: house_alarm
     entity_id: binary_sensor.alarm_system_alm_1
     trigger_on_initial_state: true
     on_press:
-      lambda: |-
-        $panelId->set_zone_fault(11,1);
+      - if:
+          condition:
+            binary_sensor.is_off: alm_1
+          then:
+            - lambda: |-
+                $panelId->set_zone_fault(11,1);
     on_release:
-      lambda: |-
-        $panelId->set_zone_fault(11,0);
+      - lambda: |-
+          $panelId->set_zone_fault(11,0);
 
 #house windows combined
   - platform: template
